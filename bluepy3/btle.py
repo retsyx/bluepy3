@@ -542,7 +542,9 @@ class Bluepy3Helper:
                 raise BTLEInternalError("Unexpected absence of response 'rsp'", resp) from her
 
             # always check for MTU updates
+            mtu_update = False
             if "mtu" in resp and len(resp["mtu"]) > 0:
+                mtu_update = True
                 new_mtu = int(resp["mtu"][0])
                 if self._mtu != new_mtu:
                     self._mtu = new_mtu
@@ -568,6 +570,11 @@ class Bluepy3Helper:
             if respType == "scan":
                 # Scan response when we weren't interested. Ignore it
                 continue
+
+            if mtu_update:
+                # Errant MTU update
+                continue
+
             raise BTLEInternalError(f"Unexpected response ({respType})", resp)
 
     def _writeCmd(self, cmd) -> None:
