@@ -61,6 +61,9 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def get_btctl_version() -> str:
+    version = os.environ.get('BLUEZ_VERSION')
+    if version is not None:
+        return version
     """Return the bluetooth version (only on Linux)."""
     args: list[str] = ["bluetoothctl", "version"]
     try:
@@ -71,7 +74,7 @@ def get_btctl_version() -> str:
             .strip("\n")
             .strip("'")
         ).split()
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.CalledProcessError):
         return "not installed"
     return f"{_exit_code[1]}"
 
