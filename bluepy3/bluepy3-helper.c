@@ -437,8 +437,8 @@ static void gatts_signed_write_cmd(const uint8_t *pdu, uint16_t len, gpointer us
 
 static void gatts_prep_write_req(const uint8_t *pdu, uint16_t len, gpointer user_data) {
   uint8_t *opdu;
-  uint8_t opcode, handle;
-  uint16_t olen;
+  uint8_t opcode;
+  uint16_t handle, olen;
   size_t plen;
 
   assert(len >= 5);
@@ -495,7 +495,7 @@ static void gatts_mtu_req(const uint8_t *pdu, uint16_t len, gpointer user_data) 
   } else {
     // send NOT SUPPORTED
     opdu = g_attrib_get_buffer(attrib, &plen);
-    olen = enc_error_resp(opcode, mtu, ATT_ECODE_REQ_NOT_SUPP, opdu, plen);
+    olen = enc_error_resp(opcode, 0x0000, ATT_ECODE_REQ_NOT_SUPP, opdu, plen);
   }
   if (olen > 0) g_attrib_send(attrib, 0, opdu, olen, NULL, NULL, NULL);
 }
@@ -559,13 +559,17 @@ static void connect_cb(GIOChannel *io, GError *err, gpointer user_data) {
 static void disconnect_io() {
   if (conn_state == STATE_DISCONNECTED) return;
 
-  g_attrib_unref(attrib);
-  attrib = NULL;
-  opt_mtu = 0;
+  if (attrib) {
+    g_attrib_unref(attrib);
+    attrib = NULL;
+    opt_mtu = 0;
+  }
 
-  g_io_channel_shutdown(iochannel, FALSE, NULL);
-  g_io_channel_unref(iochannel);
-  iochannel = NULL;
+  if (iochannel) {
+    g_io_channel_shutdown(iochannel, FALSE, NULL);
+    g_io_channel_unref(iochannel);
+    iochannel = NULL;
+  }
 
   set_state(STATE_DISCONNECTED);
 }
@@ -769,7 +773,7 @@ static void cmd_connect(int argcp, char **argvp) {
   DBG("gatt_connect returned %p", iochannel);
   if (iochannel == NULL) {
     set_state(STATE_DISCONNECTED);
-    g_error_free(gerr);
+    if (gerr) g_error_free(gerr);
   } else {
     g_io_add_watch(iochannel, G_IO_HUP | G_IO_NVAL, channel_watcher, NULL);
   }
@@ -1123,6 +1127,7 @@ static void cmd_mtu(int argcp, char **argvp) {
   if (!g_attrib_set_mtu(attrib, mtu)) {
     printf("# Error setting local MTU\n");
     resp_error(err_CALL_FAIL);
+    return;
   }
 
   opt_mtu = mtu;
@@ -1141,31 +1146,31 @@ static void set_mode_complete(uint8_t status, uint16_t length, const void *param
   resp_mgmt(err_SUCCESS);
 }
 
-static bool set_mode(uint16_t opcode, char *p_mode) {
+static void set_mode(uint16_t opcode, char *p_mode) {
   struct mgmt_mode cp;
   uint8_t val;
 
   if (!mgmt_master) {
     resp_error(err_NO_MGMT);
-    return true;
+    return;
   }
 
-  if (!memcmp(p_mode, "on", 2))
+  if (!memcmp(p_mode, "on", 2)) {
     val = 1;
-  else if (!memcmp(p_mode, "off", 3))
+  } else if (!memcmp(p_mode, "off", 3)) {
     val = 0;
-  else
-    return false;
-
+  } else {
+    resp_mgmt(err_BAD_PARAM);
+    return;
+  }
   memset(&cp, 0, sizeof(cp));
   cp.val = val;
 
   // at this time only index 0 is supported
   if (mgmt_send(mgmt_master, opcode, mgmt_ind, sizeof(cp), &cp, set_mode_complete, NULL, NULL) ==
       0) {
-    resp_mgmt(err_SUCCESS);
+    resp_mgmt(err_SEND_FAIL);
   }
-  return true;
 }
 
 static void cmd_le(int argcp, char **argvp) {
@@ -1174,9 +1179,7 @@ static void cmd_le(int argcp, char **argvp) {
     return;
   }
 
-  if (!set_mode(MGMT_OP_SET_LE, argvp[1])) {
-    resp_mgmt(err_BAD_PARAM);
-  }
+  set_mode(MGMT_OP_SET_LE, argvp[1]);
 }
 
 static void add_remote_oob_data_complete(uint8_t status, uint16_t len, const void *param,
@@ -1211,19 +1214,17 @@ static bool add_remote_oob_data(uint16_t index, const bdaddr_t *bdaddr, const ui
     len = gatt_attr_data_from_string(hash192, &oob);
     if (len == 0) {
       resp_error(err_BAD_PARAM);
-      g_free(oob);
       return false;
     }
-    memcpy(cp.hash192, oob, 16);
+    memcpy(cp.hash192, oob, len);
     g_free(oob);
     len = gatt_attr_data_from_string(rand192, &oob);
     if (len == 0) {
       resp_error(err_BAD_PARAM);
       memset(cp.hash192, 0, 16);
-      g_free(oob);
       return false;
     }
-    memcpy(cp.rand192, rand192, 16);
+    memcpy(cp.rand192, oob, len);
     g_free(oob);
   } else {
     memset(cp.hash192, 0, 16);
@@ -1235,10 +1236,9 @@ static bool add_remote_oob_data(uint16_t index, const bdaddr_t *bdaddr, const ui
       resp_error(err_BAD_PARAM);
       memset(cp.hash192, 0, 16);
       memset(cp.rand192, 0, 16);
-      g_free(oob);
       return false;
     }
-    memcpy(cp.hash256, oob, 16);
+    memcpy(cp.hash256, oob, len);
     g_free(oob);
     len = gatt_attr_data_from_string(rand256, &oob);
     if (len == 0) {
@@ -1246,10 +1246,9 @@ static bool add_remote_oob_data(uint16_t index, const bdaddr_t *bdaddr, const ui
       memset(cp.hash192, 0, 16);
       memset(cp.rand192, 0, 16);
       memset(cp.hash256, 0, 16);
-      g_free(oob);
       return false;
     }
-    memcpy(cp.rand256, rand256, 16);
+    memcpy(cp.rand256, oob, len);
     g_free(oob);
   } else {
     memset(cp.hash256, 0, 16);
@@ -1258,10 +1257,8 @@ static bool add_remote_oob_data(uint16_t index, const bdaddr_t *bdaddr, const ui
   if (mgmt_send(mgmt_master, MGMT_OP_ADD_REMOTE_OOB_DATA, mgmt_ind, sizeof(cp), &cp,
                 add_remote_oob_data_complete, NULL, NULL) == 0) {
     resp_error(err_SEND_FAIL);
-    g_free(oob);
     return false;
   }
-  g_free(oob);
   return true;
 }
 
@@ -1290,9 +1287,9 @@ static void cmd_add_oob(int argcp, char **argvp) {
   if ((!memcmp(argvp[3], "C_192", 5)) && (!memcmp(argvp[5], "R_192", 5))) {
     C192 = argvp[4];
     R192 = argvp[6];
-    if ((argcp > 8) && !memcmp(argvp[5], "C_256", 5) && (!memcmp(argvp[7], "R_256", 5))) {
-      C256 = argvp[6];
-      R256 = argvp[8];
+    if ((argcp > 10) && !memcmp(argvp[7], "C_256", 5) && (!memcmp(argvp[9], "R_256", 5))) {
+      C256 = argvp[8];
+      R256 = argvp[10];
     }
   } else {
     if ((!memcmp(argvp[3], "C_256", 5)) && (!memcmp(argvp[5], "R_256", 5))) {
@@ -1309,7 +1306,7 @@ static void cmd_add_oob(int argcp, char **argvp) {
 static void read_local_oob_data_complete(uint8_t status, uint16_t len, const void *param,
                                          void *user_data) {
   const struct mgmt_rp_read_local_oob_ext_data *rp = param;
-  uint32_t eir_len = rp->eir_len;
+  uint32_t eir_len;
   unsigned int i;
 
   if (status) {
@@ -1317,6 +1314,7 @@ static void read_local_oob_data_complete(uint8_t status, uint16_t len, const voi
     resp_mgmt_err(status);
     return;
   }
+  eir_len = rp->eir_len;
   DBG("received local OOB ext with eir_len = %d", eir_len);
   for (i = 0; i < eir_len; i++) DBG("0x%02x ", rp->eir[i]);
 
@@ -1354,9 +1352,7 @@ static void cmd_pairable(int argcp, char **argvp) {
     return;
   }
 
-  if (!set_mode(MGMT_OP_SET_BONDABLE, argvp[1])) {
-    resp_mgmt(err_BAD_PARAM);
-  }
+  set_mode(MGMT_OP_SET_BONDABLE, argvp[1]);
 }
 
 static void pair_device_complete(uint8_t status, uint16_t length, const void *param,
@@ -1431,6 +1427,11 @@ static void cmd_unpair(int argcp, char **argvp) {
 
   if (!mgmt_master) {
     resp_error(err_NO_MGMT);
+    return;
+  }
+
+  if (conn_state != STATE_CONNECTED) {
+    resp_mgmt(err_BAD_STATE);
     return;
   }
 
@@ -1646,32 +1647,31 @@ static void discover(bool start) {
   uint16_t window = htobs(0x0010);
   uint8_t filter_dup = 0x00;  // do not filter duplicates
 
-  struct hci_filter nf, of;
+  struct hci_filter nf, of = { 0 };
   // struct sigaction sa;
   socklen_t olen;
 
-  hci_dd = hci_open_dev(mgmt_ind);
-  DBG("hcidev handle is 0x%x, mgmt_ind is %d", hci_dd, mgmt_ind);
   if (start) {
+    hci_dd = hci_open_dev(mgmt_ind);
+    DBG("hcidev handle is 0x%x, mgmt_ind is %d", hci_dd, mgmt_ind);
     err = hci_le_set_scan_enable(hci_dd, 0x00, filter_dup, 10000);
     err = hci_le_set_scan_parameters(hci_dd, scan_type, interval, window, own_type, filter_policy,
                                      10000);
     if (err < 0) {
       DBG("Set scan parameters failed");
       resp_mgmt(err_BAD_STATE);
+      hci_close_dev(hci_dd);
+      hci_dd = -1;
       return;
     }
-    hci_io = g_io_channel_unix_new(hci_dd);
-    g_io_channel_set_encoding(hci_io, NULL, NULL);
-    g_io_channel_set_close_on_unref(hci_io, TRUE);
-    g_io_add_watch(hci_io, G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL, hci_monitor_cb, NULL);
-    g_io_channel_unref(hci_io);
 
     // setup filter
     olen = sizeof(of);
     if (getsockopt(hci_dd, SOL_HCI, HCI_FILTER, &of, &olen) < 0) {
       printf("Could not get socket options\n");
       resp_mgmt(err_BAD_STATE);
+      hci_close_dev(hci_dd);
+      hci_dd = -1;
       return;
     }
     hci_filter_clear(&nf);
@@ -1684,6 +1684,8 @@ static void discover(bool start) {
     if (setsockopt(hci_dd, SOL_HCI, HCI_FILTER, &nf, sizeof(nf)) < 0) {
       printf("Could not set socket options\n");
       resp_mgmt(err_BAD_STATE);
+      hci_close_dev(hci_dd);
+      hci_dd = -1;
       return;
     }
 
@@ -1693,14 +1695,24 @@ static void discover(bool start) {
       // andy: signal error
       DBG("Enable scan failed");
       resp_mgmt(err_BAD_STATE);
+      hci_close_dev(hci_dd);
+      hci_dd = -1;
       return;
     }
+
+    // Set up IO channel watch only after all operations succeeded,
+    // so error paths above can simply close hci_dd
+    hci_io = g_io_channel_unix_new(hci_dd);
+    g_io_channel_set_encoding(hci_io, NULL, NULL);
+    g_io_channel_set_close_on_unref(hci_io, TRUE);
+    g_io_add_watch(hci_io, G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL, hci_monitor_cb, NULL);
+    g_io_channel_unref(hci_io);
 
     resp_mgmt(err_SUCCESS);
     set_state(STATE_SCANNING);
   } else {
     const char *errcode = err_SUCCESS;
-
+    DBG("hcidev handle is 0x%x, mgmt_ind is %d", hci_dd, mgmt_ind);
     // set filter to receive no events
     DBG(" stop pasv scan -----------------------------------");
     setsockopt(hci_dd, SOL_HCI, HCI_FILTER, &of, sizeof(of));
@@ -1872,7 +1884,7 @@ static void mgmt_device_found(uint16_t index, uint16_t length, const void *param
   resp_begin(rsp_SCAN);
   send_addr(&ev->addr);
   send_uint(tag_RSSI, -ev->rssi);
-  send_uint(tag_FLAG, -ev->flags);
+  send_uint(tag_FLAG, ev->flags);
   if (ev->eir_len) send_data(ev->eir, ev->eir_len);
   resp_end();
 }
@@ -1883,11 +1895,11 @@ static void mgmt_debug(const char *str, void *user_data) {
   DBG("%s%s", (const char *)user_data, str);
 }
 
-static void mgmt_setup(unsigned int idx) {
+static int mgmt_setup(unsigned int idx) {
   mgmt_master = mgmt_new_default();
   if (!mgmt_master) {
     DBG("Could not connect to the BT management interface, try with su rights");
-    return;
+    return -1;
   }
   DBG("Setting up mgmt on hci%u", idx);
   mgmt_ind = idx;
@@ -1896,26 +1908,32 @@ static void mgmt_setup(unsigned int idx) {
   if (mgmt_send(mgmt_master, MGMT_OP_READ_VERSION, MGMT_INDEX_NONE, 0, NULL,
                 read_version_complete, NULL, NULL) == 0) {
     DBG("mgmt_send(MGMT_OP_READ_VERSION) failed");
+    return -1;
   }
 
   if (!mgmt_register(mgmt_master, MGMT_EV_DEVICE_CONNECTED, mgmt_ind, mgmt_device_connected, NULL,
                      NULL)) {
     DBG("mgmt_register(MGMT_EV_DEVICE_CONNECTED) failed");
+    return -1;
   }
 
   if (!mgmt_register(mgmt_master, MGMT_EV_DISCOVERING, mgmt_ind, mgmt_scanning, NULL, NULL)) {
     DBG("mgmt_register(MGMT_EV_DISCOVERING) failed");
+    return -1;
   }
 
   if (!mgmt_register(mgmt_master, MGMT_EV_DEVICE_FOUND, mgmt_ind, mgmt_device_found, NULL,
                      NULL)) {
     DBG("mgmt_register(MGMT_EV_DEVICE_FOUND) failed");
+    return -1;
   }
+  return 0;
 }
 
 int main(int argc, char *argv[]) {
   GIOChannel *pchan;
   gint events;
+  int mgmt_err;
 
   opt_sec_level = g_strdup("low");
 
@@ -1932,11 +1950,16 @@ int main(int argc, char *argv[]) {
       printf("# ERROR: cannot convert '%s' to device index integer\n", argv[1]);
       exit(1);
     } else {
-      mgmt_setup(index);
+      mgmt_err = mgmt_setup(index);
     }
   } else {
     // If no argument given, use index 0
-    mgmt_setup(0);
+    mgmt_err = mgmt_setup(0);
+  }
+
+  if (mgmt_err) {
+      printf("# ERROR: cannot setup mgmt_master\n");
+      exit(1);
   }
 
   event_loop = g_main_loop_new(NULL, FALSE);
@@ -1957,6 +1980,7 @@ int main(int argc, char *argv[]) {
 
   g_free(opt_src);
   g_free(opt_dst);
+  g_free(opt_dst_type);
   g_free(opt_sec_level);
 
   mgmt_unregister_index(mgmt_master, mgmt_ind);
