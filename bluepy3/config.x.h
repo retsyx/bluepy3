@@ -73,7 +73,7 @@
 #define PACKAGE_NAME "bluez"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "bluez 5.68"
+#define PACKAGE_STRING "bluez BLUEPY3_BLUEZ_VERSION"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "bluez"
@@ -82,7 +82,7 @@
 #define PACKAGE_URL ""
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "5.68"
+#define PACKAGE_VERSION "BLUEPY3_BLUEZ_VERSION"
 
 /* Define to 1 if you have the ANSI C header files. */
 #define STDC_HEADERS 1
@@ -116,7 +116,7 @@
 #endif
 
 /* Version number of package */
-#define VERSION "5.68"
+#define VERSION "5.70"
 
 /* Define to 1 if on MINIX. */
 /* #undef _MINIX */

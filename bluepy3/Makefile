@@ -7,9 +7,7 @@ BLUEZ_SRCS += attrib/att.c attrib/gatt.c attrib/gattrib.c attrib/utils.c
 BLUEZ_SRCS += btio/btio.c src/log.c src/shared/mgmt.c
 BLUEZ_SRCS += src/shared/crypto.c src/shared/att.c src/shared/queue.c src/shared/util.c
 BLUEZ_SRCS += src/shared/io-glib.c src/shared/timeout-glib.c
-# compiling against bluez 5.50+ requires these additional sources
 BLUEZ_SRCS += src/shared/log.c
-# compiling against bluez 5.58+ requires these additional sources
 BLUEZ_SRCS += src/shared/gatt-client.c src/shared/gatt-db.c src/shared/gatt-helpers.c
 
 IMPORT_SRCS = $(addprefix $(BLUEZ_PATH)/, $(BLUEZ_SRCS))
@@ -30,15 +28,16 @@ CPPFLAGS += -I$(BLUEZ_PATH)/attrib -I$(BLUEZ_PATH) -I$(BLUEZ_PATH)/lib -I$(BLUEZ
 CPPFLAGS += $(shell pkg-config glib-2.0 --cflags)
 LDLIBS += $(shell pkg-config glib-2.0 --libs)
 
+.PHONY: clone-srcs
+
 all: bluepy3-helper
 
-bluepy3-helper: $(LOCAL_SRCS) $(IMPORT_SRCS)
+bluepy3-helper: $(LOCAL_SRCS) clone-srcs
 	$(CC) -L. $(CFLAGS) $(CPPFLAGS) -o $@ $(LOCAL_SRCS) $(IMPORT_SRCS) $(LDLIBS)
 
-$(IMPORT_SRCS):
+clone-srcs:
 	git -c advice.detachedHead=false clone --depth 1 --branch $(BLUEZ_VERSION) https://github.com/bluez/bluez.git $(BLUEZ_PATH)
-	cp ./config/config.$(BLUEZ_VERSION).h $(BLUEZ_PATH)/config.h
-	touch $(IMPORT_SRCS)
+	sed 's|BLUEPY3_BLUEZ_VERSION|$(BLUEZ_VERSION)|g' config.x.h > $(BLUEZ_PATH)/config.h
 
 GET_SERVICES=get_services.py
 

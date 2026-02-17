@@ -36,7 +36,7 @@ if (_c > _f) or _make_helper:
         from . import helpermaker
     except ImportError:
         from bluepy3 import helpermaker
-    helpermaker.make_helper(build="installed")
+    helpermaker.build(bluez_version="installed", debug="", log_type=helpermaker.LogType.SYSLOG)
 
 SEC_LEVEL_LOW = "low"
 SEC_LEVEL_MEDIUM = "medium"
